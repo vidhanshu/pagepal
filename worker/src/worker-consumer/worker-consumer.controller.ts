@@ -2,6 +2,7 @@ import { Controller, Logger } from '@nestjs/common';
 import { EventPattern, Payload } from '@nestjs/microservices';
 import { access, readFile } from 'fs/promises';
 import { PDFParse } from 'pdf-parse';
+import { chunkText } from './utils';
 
 @Controller('worker-consumer')
 export class WorkerConsumerController {
@@ -25,7 +26,8 @@ export class WorkerConsumerController {
     const buffer = await readFile(message.path);
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
-    this.logger.log(`Extracted ${result.text.length} characters from PDF`);
+    const chunks = chunkText(result.text);
+    console.log('chunks', chunks.length);
     return result;
   }
 }
