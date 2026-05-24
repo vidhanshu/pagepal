@@ -24,3 +24,7 @@ export async function createEmbedding(text: string) {
 
   return response.embedding;
 }
+
+export function cleanText(text: string) {
+  return text.replaceAll('\0', '').trim();
+}
