@@ -25,6 +25,7 @@
     "@nestjs/microservices": "^11.1.23",
     "@nestjs/platform-express": "^11.0.1",
     "kafkajs": "^2.2.4",
+    "ollama": "^0.6.3",
     "pdf-parse": "^2.4.5",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"

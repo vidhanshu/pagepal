@@ -2,7 +2,7 @@ import { Controller, Logger } from '@nestjs/common';
 import { EventPattern, Payload } from '@nestjs/microservices';
 import { access, readFile } from 'fs/promises';
 import { PDFParse } from 'pdf-parse';
-import { chunkText } from './utils';
+import { chunkText, createEmbedding } from './utils';
 
 @Controller('worker-consumer')
 export class WorkerConsumerController {
@@ -27,6 +27,12 @@ export class WorkerConsumerController {
     const parser = new PDFParse({ data: buffer });
     const result = await parser.getText();
     const chunks = chunkText(result.text);
+
+    for (const chunk of chunks) {
+      const embedding = await createEmbedding(chunk);
+      console.log('embedding', embedding);
+    }
+
     console.log('chunks', chunks.length);
     return result;
   }

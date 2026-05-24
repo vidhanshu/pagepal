@@ -1,3 +1,5 @@
+import ollama from 'ollama';
+
 export function chunkText(text: string, chunkSize = 500, overlap = 100) {
   const chunks: string[] = [];
 
@@ -12,4 +14,13 @@ export function chunkText(text: string, chunkSize = 500, overlap = 100) {
   }
 
   return chunks;
+}
+
+export async function createEmbedding(text: string) {
+  const response = await ollama.embeddings({
+    model: 'nomic-embed-text',
+    prompt: text,
+  });
+
+  return response.embedding;
 }
