@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { mkdir, writeFile } from 'fs/promises';
 import { PdfStatus } from 'src/generated/prisma/client';
 import { ClientKafka } from '@nestjs/microservices';
+import * as path from 'path';
 
 @Injectable()
 export class ChatService implements OnModuleInit {
@@ -26,11 +27,14 @@ export class ChatService implements OnModuleInit {
   }
 
   async upload(pdfFile: Express.Multer.File, chatId: string) {
-    await mkdir('./uploads', {
-      recursive: true,
-    });
+    const uploadsDir =
+      process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), '..', 'uploads');
+    await mkdir(uploadsDir, { recursive: true });
 
-    const filePath = `./uploads/${Date.now()}-${pdfFile.originalname}`;
+    const filePath = path.join(
+      uploadsDir,
+      `${Date.now()}-${pdfFile.originalname}`,
+    );
 
     await writeFile(filePath, pdfFile.buffer);
 
@@ -44,11 +48,8 @@ export class ChatService implements OnModuleInit {
       },
     });
 
-    this.kafka.emit('pdf-uploaded', {
-      pdfId: pdf.id,
-      chatId,
-      path: pdf.storagePath,
-    });
+    const event = { pdfId: pdf.id, chatId, path: filePath };
+    this.kafka.emit('pdf-uploaded', event);
 
     return pdf;
   }
