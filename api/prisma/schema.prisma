@@ -1,0 +1,73 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique()
+  password  String
+  chats     Chat[]
+  createdAt DateTime @default(now())
+}
+
+model Chat {
+  id        String       @id @default(uuid())
+  title     String
+  userId    String
+  user      User         @relation(fields: [userId], references: [id])
+  pdf       PdfDocument?
+  messages  Message[]
+  createdAt DateTime     @default(now())
+}
+
+model PdfDocument {
+  id               String    @id @default(uuid())
+  chatId           String    @unique()
+  originalName     String
+  storagePath      String
+  size             Int
+  processingStatus PdfStatus
+  chat             Chat      @relation(fields: [chatId], references: [id])
+  chunks           Chunk[]
+  createdAt        DateTime  @default(now())
+}
+
+model Chunk {
+  id         String      @id @default(uuid())
+  pdfId      String
+  content    String
+  chunkIndex Int
+  pdf        PdfDocument @relation(fields: [pdfId], references: [id])
+  createdAt  DateTime    @default(now())
+}
+
+model Message {
+  id        String      @id @default(uuid())
+  role      MessageRole
+  content   String
+  chatId    String
+  chat      Chat        @relation(fields: [chatId], references: [id])
+  createdAt DateTime    @default(now())
+}
+
+enum PdfStatus {
+  UPLOADING
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum MessageRole {
+  USER
+  ASSISTANT
+}
