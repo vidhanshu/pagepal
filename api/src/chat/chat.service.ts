@@ -6,6 +6,12 @@ import {
   OnModuleInit,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { RedisService } from '../redis/redis.service';
+import {
+  ANSWER_CACHE_TTL_SECONDS,
+  answerCacheKey,
+  answerCachePattern,
+} from '../redis/cache-keys';
 import { mkdir, writeFile } from 'fs/promises';
 import { PdfStatus, Prisma } from 'src/generated/prisma/client';
 import { ClientKafka } from '@nestjs/microservices';
@@ -18,10 +24,17 @@ import {
 } from '../utils';
 import * as path from 'path';
 
+type AnswerResult = {
+  answer: string;
+  sources: { content: string; distance: number; chunkIndex: number }[];
+  cached?: boolean;
+};
+
 @Injectable()
 export class ChatService implements OnModuleInit {
   constructor(
     private readonly prisma: PrismaService,
+    private readonly redis: RedisService,
     @Inject('KAFKA_SERVICE') private kafka: ClientKafka,
   ) {}
 
@@ -63,10 +76,17 @@ export class ChatService implements OnModuleInit {
     const event = { pdfId: pdf.id, chatId, path: filePath };
     this.kafka.emit('pdf-uploaded', event);
 
+    await this.redis.deleteByPattern(answerCachePattern(chatId));
+
     return pdf;
   }
 
-  async getAnswer(chatId: string, question: string) {
+  async getAnswer(chatId: string, question: string): Promise<AnswerResult> {
+    const cacheKey = answerCacheKey(chatId, question);
+    const cached = await this.redis.getJson<AnswerResult>(cacheKey);
+    if (cached) {
+      return { ...cached, cached: true };
+    }
     const pdf = await this.prisma.pdfDocument.findFirst({
       where: { chatId },
       select: { id: true },
@@ -107,6 +127,9 @@ export class ChatService implements OnModuleInit {
     const context = formatContext(relevant);
     const answer = await generateAnswer(context, question);
 
-    return { answer, sources: relevant };
+    const result: AnswerResult = { answer, sources: relevant };
+    await this.redis.setJson(cacheKey, result, ANSWER_CACHE_TTL_SECONDS);
+
+    return result;
   }
 }

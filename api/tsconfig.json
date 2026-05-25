@@ -3,8 +3,7 @@
     "module": "commonjs",
     "moduleResolution": "node",
     "target": "ES2021",
-    // "resolvePackageJsonExports": true,
-    // "esModuleInterop": true,
+    "esModuleInterop": true,
     "isolatedModules": true,
     "declaration": true,
     "removeComments": true,
@@ -21,5 +20,6 @@
     "noImplicitAny": false,
     "strictBindCallApply": false,
     "noFallthroughCasesInSwitch": false
-  }
+  },
+  "include": ["src/**/*"]
 }
