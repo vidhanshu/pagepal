@@ -3,7 +3,7 @@ import { EventPattern, Payload } from '@nestjs/microservices';
 import { access, readFile } from 'fs/promises';
 import { PDFParse } from 'pdf-parse';
 import { chunkText, cleanText, createEmbedding } from './utils';
-import { Prisma } from '../../generated/prisma/client';
+import { Prisma } from '../generated/prisma/client';
 import { PrismaService } from 'src/prisma/prisma.service';
 
 @Controller('worker-consumer')
@@ -40,9 +40,11 @@ export class WorkerConsumerController {
       .map((c) => cleanText(c))
       .filter((c) => c.length > 0);
 
+    await this.prisma.chunk.deleteMany({ where: { pdfId: message.pdfId } });
+
     for (let i = 0; i < chunks.length; i++) {
       const chunk = chunks[i];
-      const embedding = await createEmbedding(chunk);
+      const embedding = await createEmbedding(chunk, 'document');
       const embeddingVector = Prisma.raw(`'[${embedding.join(',')}]'::vector`);
 
       await this.prisma.$executeRaw(

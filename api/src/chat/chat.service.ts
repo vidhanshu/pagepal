@@ -1,9 +1,21 @@
 import { CreateChatDto } from './dto/create-chat.dto';
-import { Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  NotFoundException,
+  OnModuleInit,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { mkdir, writeFile } from 'fs/promises';
-import { PdfStatus } from 'src/generated/prisma/client';
+import { PdfStatus, Prisma } from 'src/generated/prisma/client';
 import { ClientKafka } from '@nestjs/microservices';
+import {
+  cleanText,
+  createEmbedding,
+  formatContext,
+  generateAnswer,
+  MAX_CHUNK_DISTANCE,
+} from '../utils';
 import * as path from 'path';
 
 @Injectable()
@@ -52,5 +64,49 @@ export class ChatService implements OnModuleInit {
     this.kafka.emit('pdf-uploaded', event);
 
     return pdf;
+  }
+
+  async getAnswer(chatId: string, question: string) {
+    const pdf = await this.prisma.pdfDocument.findFirst({
+      where: { chatId },
+      select: { id: true },
+    });
+
+    if (!pdf) {
+      throw new NotFoundException('PDF not found for this chat');
+    }
+
+    const embedding = await createEmbedding(cleanText(question), 'query');
+    const queryVector = Prisma.raw(`'[${embedding.join(',')}]'::vector`);
+
+    const chunks = await this.prisma.$queryRaw<
+      { content: string; distance: number; chunkIndex: number }[]
+    >(
+      Prisma.sql`
+        SELECT
+          content,
+          embedding <=> ${queryVector} AS distance,
+          "chunkIndex"
+        FROM "Chunk"
+        WHERE "pdfId" = ${pdf.id}
+        ORDER BY embedding <=> ${queryVector}
+        LIMIT 8
+      `,
+    );
+
+    const relevant = chunks.filter((c) => c.distance <= MAX_CHUNK_DISTANCE);
+
+    if (relevant.length === 0) {
+      return {
+        answer:
+          'I could not find relevant information in the document for that question. Try rephrasing or ensure the PDF was fully processed.',
+        sources: chunks,
+      };
+    }
+
+    const context = formatContext(relevant);
+    const answer = await generateAnswer(context, question);
+
+    return { answer, sources: relevant };
   }
 }

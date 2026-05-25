@@ -9,6 +9,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { CreateChatDto } from './dto/create-chat.dto';
+import { AnswerQuestionDto } from './dto/answer-question.dto';
 import { ChatService } from './chat.service';
 import { FileInterceptor } from '@nestjs/platform-express';
 
@@ -52,5 +53,10 @@ export class ChatController {
     @Param('chatId') chatId: string,
   ) {
     return this.chatService.upload(file, chatId);
+  }
+
+  @Post(':chatId/answer')
+  getAnswer(@Param('chatId') chatId: string, @Body() body: AnswerQuestionDto) {
+    return this.chatService.getAnswer(chatId, body.question);
   }
 }
