@@ -35,6 +35,7 @@ model PdfDocument {
   chatId           String    @unique()
   originalName     String
   storagePath      String
+  s3Key            String
   size             Int
   processingStatus PdfStatus
   chat             Chat      @relation(fields: [chatId], references: [id], onDelete: Cascade)

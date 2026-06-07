@@ -7,6 +7,7 @@ import { ConfigModule } from '@nestjs/config';
 import { PrismaModule } from './prisma/prisma.module';
 import { KafkaModule } from './kafka/kafka.module';
 import { RedisModule } from './redis/redis.module';
+import { S3Module } from './s3/s3.module';
 
 @Module({
   imports: [
@@ -15,6 +16,7 @@ import { RedisModule } from './redis/redis.module';
     RedisModule,
     KafkaModule,
     ChatModule,
+    S3Module,
   ],
   controllers: [AppController],
   providers: [AppService, PrismaService],

@@ -12,7 +12,6 @@ import {
   answerCacheKey,
   answerCachePattern,
 } from '../redis/cache-keys';
-import { mkdir, writeFile } from 'fs/promises';
 import { PdfStatus, Prisma } from 'src/generated/prisma/client';
 import { ClientKafka } from '@nestjs/microservices';
 import {
@@ -22,7 +21,7 @@ import {
   generateAnswer,
   MAX_CHUNK_DISTANCE,
 } from '../utils';
-import * as path from 'path';
+import { S3Service } from 'src/s3/s3.service';
 
 type AnswerResult = {
   answer: string;
@@ -36,6 +35,7 @@ export class ChatService implements OnModuleInit {
     private readonly prisma: PrismaService,
     private readonly redis: RedisService,
     @Inject('KAFKA_SERVICE') private kafka: ClientKafka,
+    private readonly s3: S3Service,
   ) {}
 
   async onModuleInit() {
@@ -52,28 +52,33 @@ export class ChatService implements OnModuleInit {
   }
 
   async upload(pdfFile: Express.Multer.File, chatId: string) {
-    const uploadsDir =
-      process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), '..', 'uploads');
-    await mkdir(uploadsDir, { recursive: true });
+    const s3Key = `${chatId}/${Date.now()}-${pdfFile.originalname}`;
+    await this.s3.uploadFile(pdfFile.buffer, s3Key);
 
-    const filePath = path.join(
-      uploadsDir,
-      `${Date.now()}-${pdfFile.originalname}`,
-    );
+    // ********** OLD CODE **********
+    // const uploadsDir =
+    //   process.env.UPLOADS_DIR ?? path.resolve(process.cwd(), '..', 'uploads');
+    // await mkdir(uploadsDir, { recursive: true });
 
-    await writeFile(filePath, pdfFile.buffer);
+    // const filePath = path.join(
+    //   uploadsDir,
+    //   `${Date.now()}-${pdfFile.originalname}`,
+    // );
+
+    // await writeFile(filePath, pdfFile.buffer);
+    // ********** OLD CODE **********
 
     const pdf = await this.prisma.pdfDocument.create({
       data: {
         chatId,
         originalName: pdfFile.originalname,
-        storagePath: filePath,
+        s3Key,
         size: pdfFile.size,
         processingStatus: PdfStatus.UPLOADING,
       },
     });
 
-    const event = { pdfId: pdf.id, chatId, path: filePath };
+    const event = { pdfId: pdf.id, chatId, s3Key };
     this.kafka.emit('pdf-uploaded', event);
 
     await this.redis.deleteByPattern(answerCachePattern(chatId));
