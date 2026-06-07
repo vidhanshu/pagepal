@@ -1,0 +1,27 @@
+{
+  "name": "pdf-chat-ai",
+  "version": "0.0.1",
+  "private": true,
+  "packageManager": "pnpm@9.15.4",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
+    "dev:api": "pnpm --filter @pdf-chat-ai/api start:dev",
+    "dev:worker": "pnpm --filter @pdf-chat-ai/worker start:dev",
+    "dev:web": "pnpm --filter @pdf-chat-ai/web dev",
+    "lint": "pnpm -r lint",
+    "format": "prettier --write \"**/*.{ts,tsx,js,json,md}\"",
+    "db:generate": "pnpm --filter @pdf-chat-ai/database generate",
+    "db:migrate": "pnpm --filter @pdf-chat-ai/database db:migrate",
+    "db:deploy": "pnpm --filter @pdf-chat-ai/database db:deploy",
+    "db:studio": "pnpm --filter @pdf-chat-ai/database db:studio",
+    "db:reset": "pnpm --filter @pdf-chat-ai/database db:reset"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.3"
+  }
+}

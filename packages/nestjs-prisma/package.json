@@ -1,0 +1,31 @@
+{
+  "name": "@pdf-chat-ai/nestjs-prisma",
+  "version": "0.0.1",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch"
+  },
+  "dependencies": {
+    "@pdf-chat-ai/database": "workspace:*",
+    "@prisma/adapter-pg": "^7.8.0"
+  },
+  "peerDependencies": {
+    "@nestjs/common": "^11.0.1",
+    "reflect-metadata": "^0.2.2"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^11.0.1",
+    "@types/node": "^24.0.0",
+    "reflect-metadata": "^0.2.2",
+    "typescript": "^5.7.3"
+  }
+}
