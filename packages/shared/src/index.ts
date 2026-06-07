@@ -1,4 +1,4 @@
-import ollama from 'ollama';
+import ollama from "ollama";
 
 const MIN_CHUNK_CHARS = 80;
 const DEFAULT_CHUNK_SIZE = 1200;
@@ -6,13 +6,13 @@ const DEFAULT_OVERLAP = 200;
 
 export function cleanText(text: string) {
   return text
-    .replaceAll('\0', '')
-    .replace(/\r\n/g, '\n')
-    .replace(/--\s*\d+\s+of\s+\d+\s+--/gi, '')
-    .replace(/\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}\s*(?:AM|PM)?/gi, '')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]+/g, ' ')
-    .replace(/\n /g, '\n')
+    .replaceAll("\0", "")
+    .replace(/\r\n/g, "\n")
+    .replace(/--\s*\d+\s+of\s+\d+\s+--/gi, "")
+    .replace(/\d{1,2}\/\d{1,2}\/\d{2,4},?\s+\d{1,2}:\d{2}\s*(?:AM|PM)?/gi, "")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n /g, "\n")
     .trim();
 }
 
@@ -28,13 +28,13 @@ export function chunkText(
     .filter((p) => p.length >= MIN_CHUNK_CHARS);
 
   const chunks: string[] = [];
-  let current = '';
+  let current = "";
 
   const flush = () => {
     if (current.length >= MIN_CHUNK_CHARS) {
       chunks.push(current);
     }
-    current = '';
+    current = "";
   };
 
   for (const para of paragraphs) {
@@ -66,11 +66,11 @@ export function chunkText(
 
 export async function createEmbedding(
   text: string,
-  task: 'document' | 'query' = 'document',
+  task: "document" | "query" = "document",
 ) {
-  const prefix = task === 'query' ? 'search_query: ' : 'search_document: ';
+  const prefix = task === "query" ? "search_query: " : "search_document: ";
   const response = await ollama.embeddings({
-    model: 'nomic-embed-text',
+    model: "nomic-embed-text",
     prompt: prefix + text,
   });
 
@@ -88,15 +88,15 @@ export function formatContext(
       (c, i) =>
         `[Excerpt ${i + 1} | chunk #${c.chunkIndex}]\n${c.content.trim()}`,
     )
-    .join('\n\n---\n\n');
+    .join("\n\n---\n\n");
 }
 
 export async function generateAnswer(context: string, question: string) {
   const response = await ollama.chat({
-    model: 'qwen3:4b',
+    model: "qwen3:4b",
     messages: [
       {
-        role: 'system',
+        role: "system",
         content: `You answer questions using ONLY the provided PDF excerpts.
 The excerpts may be fragmented (broken lines, headers, page numbers) — still extract useful facts when present.
 Synthesize a clear, direct answer from the excerpts.
@@ -104,11 +104,43 @@ Only say "I could not find it in the document." if none of the excerpts relate t
 Do not use outside knowledge.`,
       },
       {
-        role: 'user',
+        role: "user",
         content: `Excerpts from the PDF:\n\n${context}\n\n---\n\nQuestion: ${question}`,
       },
     ],
   });
 
   return response.message.content;
+}
+
+/** Streams the answer token-by-token, hiding the underlying LLM client. */
+export async function* streamAnswer(
+  context: string,
+  question: string,
+): AsyncGenerator<string> {
+  const response = await ollama.chat({
+    model: "qwen3:4b",
+    stream: true,
+    messages: [
+      {
+        role: "system",
+        content: `You answer questions using ONLY the provided PDF excerpts.
+The excerpts may be fragmented (broken lines, headers, page numbers) — still extract useful facts when present.
+Synthesize a clear, direct answer from the excerpts.
+Only say "I could not find it in the document." if none of the excerpts relate to the question.
+Do not use outside knowledge.`,
+      },
+      {
+        role: "user",
+        content: `Excerpts from the PDF:\n\n${context}\n\n---\n\nQuestion: ${question}`,
+      },
+    ],
+  });
+
+  for await (const part of response) {
+    const token = part.message.content;
+    if (token) {
+      yield token;
+    }
+  }
 }

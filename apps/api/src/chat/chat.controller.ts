@@ -4,6 +4,8 @@ import {
   Get,
   Param,
   Post,
+  Query,
+  Sse,
   UseInterceptors,
   UploadedFile,
   BadRequestException,
@@ -58,5 +60,13 @@ export class ChatController {
   @Post(':chatId/answer')
   getAnswer(@Param('chatId') chatId: string, @Body() body: AnswerQuestionDto) {
     return this.chatService.getAnswer(chatId, body.question);
+  }
+
+  @Sse(':chatId/stream')
+  streamAnswer(
+    @Param('chatId') chatId: string,
+    @Query('question') question: string,
+  ) {
+    return this.chatService.streamAnswer(chatId, question);
   }
 }

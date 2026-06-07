@@ -2,6 +2,7 @@ import { CreateChatDto } from './dto/create-chat.dto';
 import {
   Inject,
   Injectable,
+  MessageEvent,
   NotFoundException,
   OnModuleInit,
 } from '@nestjs/common';
@@ -20,8 +21,10 @@ import {
   formatContext,
   generateAnswer,
   MAX_CHUNK_DISTANCE,
+  streamAnswer,
 } from '@pdf-chat-ai/shared';
 import { S3Service } from '@pdf-chat-ai/nestjs-s3';
+import { Observable } from 'rxjs';
 
 type AnswerResult = {
   answer: string;
@@ -138,5 +141,87 @@ export class ChatService implements OnModuleInit {
     await this.redis.setJson(cacheKey, result, ANSWER_CACHE_TTL_SECONDS);
 
     return result;
+  }
+
+  async streamAnswer(
+    chatId: string,
+    question: string,
+  ): Promise<Observable<MessageEvent>> {
+    const cacheKey = answerCacheKey(chatId, question);
+    const cached = await this.redis.getJson<AnswerResult>(cacheKey);
+    if (cached) {
+      return new Observable<MessageEvent>((subscriber) => {
+        subscriber.next({ data: { content: cached.answer, cached: true } });
+        subscriber.next({
+          data: { done: true, sources: cached.sources, cached: true },
+        });
+        subscriber.complete();
+      });
+    }
+
+    const pdf = await this.prisma.pdfDocument.findFirst({
+      where: { chatId },
+      select: { id: true },
+    });
+
+    if (!pdf) {
+      throw new NotFoundException('PDF not found for this chat');
+    }
+
+    const embedding = await createEmbedding(cleanText(question), 'query');
+    const queryVector = Prisma.raw(`'[${embedding.join(',')}]'::vector`);
+
+    const chunks = await this.prisma.$queryRaw<
+      { content: string; distance: number; chunkIndex: number }[]
+    >(
+      Prisma.sql`
+        SELECT
+          content,
+          embedding <=> ${queryVector} AS distance,
+          "chunkIndex"
+        FROM "Chunk"
+        WHERE "pdfId" = ${pdf.id}
+        ORDER BY embedding <=> ${queryVector}
+        LIMIT 8
+      `,
+    );
+
+    const relevant = chunks.filter((c) => c.distance <= MAX_CHUNK_DISTANCE);
+
+    if (relevant.length === 0) {
+      return new Observable<MessageEvent>((subscriber) => {
+        subscriber.next({
+          data: {
+            content:
+              'I could not find relevant information in the document for that question. Try rephrasing or ensure the PDF was fully processed.',
+          },
+        });
+        subscriber.next({ data: { done: true, sources: chunks } });
+        subscriber.complete();
+      });
+    }
+
+    const context = formatContext(relevant);
+    const tokens = streamAnswer(context, question);
+
+    return new Observable<MessageEvent>((subscriber) => {
+      let answer = '';
+
+      (async () => {
+        for await (const token of tokens) {
+          answer += token;
+          subscriber.next({ data: { content: token } });
+        }
+
+        const result: AnswerResult = { answer, sources: relevant };
+        await this.redis.setJson(cacheKey, result, ANSWER_CACHE_TTL_SECONDS);
+
+        subscriber.next({ data: { done: true, sources: relevant } });
+        subscriber.complete();
+      })().catch((err) => subscriber.error(err));
+
+      // Stop generating if the client disconnects.
+      return () => void tokens.return(undefined);
+    });
   }
 }
