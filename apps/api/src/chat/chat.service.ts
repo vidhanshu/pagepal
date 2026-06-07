@@ -32,6 +32,33 @@ type AnswerResult = {
   cached?: boolean;
 };
 
+type TimingMark = { step: string; ms: number };
+
+function createRequestTimer(label: string) {
+  const t0 = performance.now();
+  let last = t0;
+  const marks: TimingMark[] = [];
+
+  const totalMs = () => Math.round(performance.now() - t0);
+
+  const mark = (step: string) => {
+    const now = performance.now();
+    marks.push({ step, ms: Math.round(now - last) });
+    last = now;
+  };
+
+  const log = (extra?: Record<string, unknown>) => {
+    const breakdown = Object.fromEntries(marks.map((m) => [m.step, m.ms]));
+    console.log(`[ChatService.${label}]`, {
+      breakdownMs: breakdown,
+      totalMs: totalMs(),
+      ...extra,
+    });
+  };
+
+  return { mark, totalMs, log };
+}
+
 @Injectable()
 export class ChatService implements OnModuleInit {
   constructor(
@@ -92,21 +119,28 @@ export class ChatService implements OnModuleInit {
   }
 
   async getAnswer(chatId: string, question: string): Promise<AnswerResult> {
+    const timer = createRequestTimer('getAnswer');
+
     const cacheKey = answerCacheKey(chatId, question);
     const cached = await this.redis.getJson<AnswerResult>(cacheKey);
+    timer.mark('cacheLookup');
     if (cached) {
+      timer.log({ chatId, cached: true });
       return { ...cached, cached: true };
     }
+
     const pdf = await this.prisma.pdfDocument.findFirst({
       where: { chatId },
       select: { id: true },
     });
+    timer.mark('pdfLookup');
 
     if (!pdf) {
       throw new NotFoundException('PDF not found for this chat');
     }
 
     const embedding = await createEmbedding(cleanText(question), 'query');
+    timer.mark('embedding');
     const queryVector = Prisma.raw(`'[${embedding.join(',')}]'::vector`);
 
     const chunks = await this.prisma.$queryRaw<
@@ -123,10 +157,12 @@ export class ChatService implements OnModuleInit {
         LIMIT 8
       `,
     );
+    timer.mark('vectorQuery');
 
     const relevant = chunks.filter((c) => c.distance <= MAX_CHUNK_DISTANCE);
 
     if (relevant.length === 0) {
+      timer.log({ chatId, chunkCount: chunks.length, relevantCount: 0 });
       return {
         answer:
           'I could not find relevant information in the document for that question. Try rephrasing or ensure the PDF was fully processed.',
@@ -135,10 +171,21 @@ export class ChatService implements OnModuleInit {
     }
 
     const context = formatContext(relevant);
+    timer.mark('formatContext');
+
     const answer = await generateAnswer(context, question);
+    timer.mark('llmGenerate');
 
     const result: AnswerResult = { answer, sources: relevant };
     await this.redis.setJson(cacheKey, result, ANSWER_CACHE_TTL_SECONDS);
+    timer.mark('cacheWrite');
+
+    timer.log({
+      chatId,
+      chunkCount: chunks.length,
+      relevantCount: relevant.length,
+      answerLength: answer.length,
+    });
 
     return result;
   }
@@ -147,9 +194,13 @@ export class ChatService implements OnModuleInit {
     chatId: string,
     question: string,
   ): Promise<Observable<MessageEvent>> {
+    const timer = createRequestTimer('streamAnswer');
+
     const cacheKey = answerCacheKey(chatId, question);
     const cached = await this.redis.getJson<AnswerResult>(cacheKey);
+    timer.mark('cacheLookup');
     if (cached) {
+      timer.log({ chatId, cached: true });
       return new Observable<MessageEvent>((subscriber) => {
         subscriber.next({ data: { content: cached.answer, cached: true } });
         subscriber.next({
@@ -163,12 +214,14 @@ export class ChatService implements OnModuleInit {
       where: { chatId },
       select: { id: true },
     });
+    timer.mark('pdfLookup');
 
     if (!pdf) {
       throw new NotFoundException('PDF not found for this chat');
     }
 
     const embedding = await createEmbedding(cleanText(question), 'query');
+    timer.mark('embedding');
     const queryVector = Prisma.raw(`'[${embedding.join(',')}]'::vector`);
 
     const chunks = await this.prisma.$queryRaw<
@@ -185,10 +238,12 @@ export class ChatService implements OnModuleInit {
         LIMIT 8
       `,
     );
+    timer.mark('vectorQuery');
 
     const relevant = chunks.filter((c) => c.distance <= MAX_CHUNK_DISTANCE);
 
     if (relevant.length === 0) {
+      timer.log({ chatId, chunkCount: chunks.length, relevantCount: 0 });
       return new Observable<MessageEvent>((subscriber) => {
         subscriber.next({
           data: {
@@ -202,25 +257,49 @@ export class ChatService implements OnModuleInit {
     }
 
     const context = formatContext(relevant);
+    timer.mark('formatContext');
+
     const tokens = streamAnswer(context, question);
+    const preStreamMs = timer.totalMs();
 
     return new Observable<MessageEvent>((subscriber) => {
       let answer = '';
+      let tokenCount = 0;
+      let firstTokenMs: number | null = null;
+      const streamStart = performance.now();
 
       (async () => {
         for await (const token of tokens) {
+          if (firstTokenMs === null) {
+            firstTokenMs = Math.round(performance.now() - streamStart);
+          }
+          tokenCount++;
           answer += token;
           subscriber.next({ data: { content: token } });
         }
 
+        const llmStreamMs = Math.round(performance.now() - streamStart);
+        const cacheWriteStart = performance.now();
         const result: AnswerResult = { answer, sources: relevant };
         await this.redis.setJson(cacheKey, result, ANSWER_CACHE_TTL_SECONDS);
+        const cacheWriteMs = Math.round(performance.now() - cacheWriteStart);
+
+        timer.log({
+          chatId,
+          chunkCount: chunks.length,
+          relevantCount: relevant.length,
+          tokenCount,
+          answerLength: answer.length,
+          preStreamMs,
+          timeToFirstTokenMs: firstTokenMs,
+          llmStreamMs,
+          cacheWriteMs,
+        });
 
         subscriber.next({ data: { done: true, sources: relevant } });
         subscriber.complete();
       })().catch((err) => subscriber.error(err));
 
-      // Stop generating if the client disconnects.
       return () => void tokens.return(undefined);
     });
   }

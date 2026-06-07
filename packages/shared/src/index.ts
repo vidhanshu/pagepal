@@ -1,5 +1,9 @@
 import ollama from "ollama";
 
+/** Qwen3 "thinks" before answering — adds 10–40s+ TTFT with no visible tokens. */
+const CHAT_MODEL = process.env.LLM_CHAT_MODEL ?? "qwen3:4b";
+const CHAT_OPTIONS = { think: false as const };
+
 const MIN_CHUNK_CHARS = 80;
 const DEFAULT_CHUNK_SIZE = 1200;
 const DEFAULT_OVERLAP = 200;
@@ -91,26 +95,43 @@ export function formatContext(
     .join("\n\n---\n\n");
 }
 
-export async function generateAnswer(context: string, question: string) {
-  const response = await ollama.chat({
-    model: "qwen3:4b",
-    messages: [
-      {
-        role: "system",
-        content: `You answer questions using ONLY the provided PDF excerpts.
+const ANSWER_SYSTEM_PROMPT = `You answer questions using ONLY the provided PDF excerpts.
 The excerpts may be fragmented (broken lines, headers, page numbers) — still extract useful facts when present.
 Synthesize a clear, direct answer from the excerpts.
 Only say "I could not find it in the document." if none of the excerpts relate to the question.
-Do not use outside knowledge.`,
-      },
-      {
-        role: "user",
-        content: `Excerpts from the PDF:\n\n${context}\n\n---\n\nQuestion: ${question}`,
-      },
-    ],
+Do not use outside knowledge.`;
+
+export async function generateAnswer(context: string, question: string) {
+  const response = await ollama.chat({
+    model: CHAT_MODEL,
+    think: CHAT_OPTIONS.think,
+    messages: answerMessages(context, question),
   });
 
   return response.message.content;
+}
+
+/** Prompt size stats for timing diagnostics. */
+export function buildAnswerPrompt(context: string, question: string) {
+  return {
+    contextChars: context.length,
+    questionChars: question.length,
+    totalChars:
+      ANSWER_SYSTEM_PROMPT.length +
+      context.length +
+      question.length +
+      40,
+  };
+}
+
+function answerMessages(context: string, question: string) {
+  return [
+    { role: "system" as const, content: ANSWER_SYSTEM_PROMPT },
+    {
+      role: "user" as const,
+      content: `Excerpts from the PDF:\n\n${context}\n\n---\n\nQuestion: ${question}`,
+    },
+  ];
 }
 
 /** Streams the answer token-by-token, hiding the underlying LLM client. */
@@ -119,22 +140,10 @@ export async function* streamAnswer(
   question: string,
 ): AsyncGenerator<string> {
   const response = await ollama.chat({
-    model: "qwen3:4b",
+    model: CHAT_MODEL,
     stream: true,
-    messages: [
-      {
-        role: "system",
-        content: `You answer questions using ONLY the provided PDF excerpts.
-The excerpts may be fragmented (broken lines, headers, page numbers) — still extract useful facts when present.
-Synthesize a clear, direct answer from the excerpts.
-Only say "I could not find it in the document." if none of the excerpts relate to the question.
-Do not use outside knowledge.`,
-      },
-      {
-        role: "user",
-        content: `Excerpts from the PDF:\n\n${context}\n\n---\n\nQuestion: ${question}`,
-      },
-    ],
+    think: CHAT_OPTIONS.think,
+    messages: answerMessages(context, question),
   });
 
   for await (const part of response) {
